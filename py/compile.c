@@ -124,7 +124,7 @@ STATIC const emit_inline_asm_method_table_t *emit_asm_table[] = {
     NULL,
     NULL,
     NULL,
-    NULL,
+    &emit_inline_thumb_method_table,
     &emit_inline_thumb_method_table,
     &emit_inline_thumb_method_table,
     &emit_inline_thumb_method_table,
@@ -3112,6 +3112,9 @@ STATIC void compile_scope(compiler_t *comp, scope_t *scope, pass_kind_t pass) {
             scope->num_pos_args = 1;
         }
 
+        // Set the source line number for the start of the comprehension
+        EMIT_ARG(set_source_line, pns->source_line);
+
         if (scope->kind == SCOPE_LIST_COMP) {
             EMIT_ARG(build, 0, MP_EMIT_BUILD_LIST);
         } else if (scope->kind == SCOPE_DICT_COMP) {
@@ -3457,12 +3460,12 @@ mp_raw_code_t *mp_compile_to_raw_code(mp_parse_tree_t *parse_tree, qstr source_f
     #endif
     uint max_num_labels = 0;
     for (scope_t *s = comp->scope_head; s != NULL && comp->compile_error == MP_OBJ_NULL; s = s->next) {
-        if (false) {
         #if MICROPY_EMIT_INLINE_ASM
-        } else if (s->emit_options == MP_EMIT_OPT_ASM) {
+        if (s->emit_options == MP_EMIT_OPT_ASM) {
             compile_scope_inline_asm(comp, s, MP_PASS_SCOPE);
+        } else
         #endif
-        } else {
+        {
             compile_scope(comp, s, MP_PASS_SCOPE);
 
             // Check if any implicitly declared variables should be closed over
@@ -3493,11 +3496,8 @@ mp_raw_code_t *mp_compile_to_raw_code(mp_parse_tree_t *parse_tree, qstr source_f
     emit_t *emit_native = NULL;
 #endif
     for (scope_t *s = comp->scope_head; s != NULL && comp->compile_error == MP_OBJ_NULL; s = s->next) {
-        if (false) {
-            // dummy
-
         #if MICROPY_EMIT_INLINE_ASM
-        } else if (s->emit_options == MP_EMIT_OPT_ASM) {
+        if (s->emit_options == MP_EMIT_OPT_ASM) {
             // inline assembly
             if (comp->emit_inline_asm == NULL) {
                 comp->emit_inline_asm = ASM_EMITTER(new)(max_num_labels);
@@ -3519,9 +3519,9 @@ mp_raw_code_t *mp_compile_to_raw_code(mp_parse_tree_t *parse_tree, qstr source_f
             if (comp->compile_error == MP_OBJ_NULL) {
                 compile_scope_inline_asm(comp, s, MP_PASS_EMIT);
             }
+        } else
         #endif
-
-        } else {
+        {
 
             // choose the emit type
 

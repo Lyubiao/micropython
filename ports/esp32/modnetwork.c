@@ -48,6 +48,7 @@
 #include "esp_event_loop.h"
 #include "lwip/dns.h"
 #include "tcpip_adapter.h"
+#include "mdns.h"
 
 #include "modnetwork.h"
 
@@ -128,6 +129,11 @@ static bool wifi_sta_connected = false;
 // Store the current status. 0 means None here, safe to do so as first enum value is WIFI_REASON_UNSPECIFIED=1.
 static uint8_t wifi_sta_disconn_reason = 0;
 
+#if MICROPY_HW_ENABLE_MDNS_QUERIES || MICROPY_HW_ENABLE_MDNS_RESPONDER
+// Whether mDNS has been initialised or not
+static bool mdns_initialised = false;
+#endif
+
 // This function is called by the system-event task and so runs in a different
 // thread to the main MicroPython task.  It must not raise any Python exceptions.
 static esp_err_t event_handler(void *ctx, system_event_t *event) {
@@ -142,6 +148,20 @@ static esp_err_t event_handler(void *ctx, system_event_t *event) {
         ESP_LOGI("network", "GOT_IP");
         wifi_sta_connected = true;
         wifi_sta_disconn_reason = 0; // Success so clear error. (in case of new error will be replaced anyway)
+        #if MICROPY_HW_ENABLE_MDNS_QUERIES || MICROPY_HW_ENABLE_MDNS_RESPONDER
+        if (!mdns_initialised) {
+            mdns_init();
+            #if MICROPY_HW_ENABLE_MDNS_RESPONDER
+            const char *hostname = NULL;
+            if (tcpip_adapter_get_hostname(WIFI_IF_STA, &hostname) != ESP_OK || hostname == NULL) {
+                hostname = "esp32";
+            }
+            mdns_hostname_set(hostname);
+            mdns_instance_name_set(hostname);
+            #endif
+            mdns_initialised = true;
+        }
+        #endif
         break;
     case SYSTEM_EVENT_STA_DISCONNECTED: {
         // This is a workaround as ESP32 WiFi libs don't currently
@@ -159,8 +179,8 @@ static esp_err_t event_handler(void *ctx, system_event_t *event) {
                 message = "\nno AP found";
                 break;
             case WIFI_REASON_AUTH_FAIL:
+                // Password may be wrong, or it just failed to connect; try to reconnect.
                 message = "\nauthentication failed";
-                wifi_sta_connect_requested = false;
                 break;
             default:
                 // Let other errors through and try to reconnect.
@@ -312,7 +332,7 @@ STATIC mp_obj_t esp_connect(size_t n_args, const mp_obj_t *pos_args, mp_map_t *k
 
     // configure any parameters that are given
     if (n_args > 1) {
-        mp_uint_t len;
+        size_t len;
         const char *p;
         if (args[ARG_ssid].u_obj != mp_const_none) {
             p = mp_obj_str_get_data(args[ARG_ssid].u_obj, &len);
@@ -553,7 +573,7 @@ STATIC mp_obj_t esp_config(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs
                     }
                     case QS(MP_QSTR_essid): {
                         req_if = WIFI_IF_AP;
-                        mp_uint_t len;
+                        size_t len;
                         const char *s = mp_obj_str_get_data(kwargs->table[i].value, &len);
                         len = MIN(len, sizeof(cfg.ap.ssid));
                         memcpy(cfg.ap.ssid, s, len);
@@ -572,7 +592,7 @@ STATIC mp_obj_t esp_config(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs
                     }
                     case QS(MP_QSTR_password): {
                         req_if = WIFI_IF_AP;
-                        mp_uint_t len;
+                        size_t len;
                         const char *s = mp_obj_str_get_data(kwargs->table[i].value, &len);
                         len = MIN(len, sizeof(cfg.ap.password) - 1);
                         memcpy(cfg.ap.password, s, len);
